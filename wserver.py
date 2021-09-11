@@ -10,6 +10,10 @@ import asyncio
 from aiohttp import web
 import nodes
 
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[logging.FileHandler('log.txt'), logging.StreamHandler()],
+                    level=logging.INFO)
+
 LOGGER = logging.getLogger(__name__)
 
 routes = web.RouteTableDef()
@@ -562,7 +566,7 @@ async def list_torrent_contents(request):
 
     gets = request.query
 
-    if not "pin_code" in gets.keys():
+    if "pin_code" not in gets.keys():
         rend_page = code_page.replace("{form_url}", f"/slam/files/{torr}")
         return web.Response(text=rend_page, content_type='text/html')
 
@@ -617,39 +621,35 @@ async def re_verfiy(paused, resumed, client, torr):
             if str(i.id) in paused:
                 if i.priority == 0:
                     continue
-                else:
-                    verify = False
-                    break
+                verify = False
+                break
 
-            if str(i.id) in resumed:
-                if i.priority != 0:
-                    continue
-                else:
-                    verify = False
-                    break
+            if str(i.id) in resumed and i.priority == 0:
+                verify = False
+                break
 
-        if not verify:
-            LOGGER.error("Reverification Failed, correcting stuff...")
-            client.auth_log_out()
-            client = qba.Client(host="localhost", port="8090",
-                               username="admin", password="adminadmin")
-            client.auth_log_in()
-            try:
-                client.torrents_file_priority(
-                    torrent_hash=torr, file_ids=paused, priority=0)
-            except:
-                LOGGER.error("Errored in reverification paused")
-            try:
-                client.torrents_file_priority(
-                    torrent_hash=torr, file_ids=resumed, priority=1)
-            except:
-                LOGGER.error("Errored in reverification resumed")
-            client.auth_log_out()
-        else:
+        if verify:
             break
+        LOGGER.info("Reverification Failed: correcting stuff...")
+        client.auth_log_out()
+        client = qba.Client(host="localhost", port="8090",
+                           username="admin", password="adminadmin")
+        client.auth_log_in()
+        try:
+            client.torrents_file_priority(
+                torrent_hash=torr, file_ids=paused, priority=0)
+        except:
+            LOGGER.error("Errored in reverification paused")
+        try:
+            client.torrents_file_priority(
+                torrent_hash=torr, file_ids=resumed, priority=1)
+        except:
+            LOGGER.error("Errored in reverification resumed")
+        client.auth_log_out()
         k += 1
         if k > 4:
             return False
+    LOGGER.info("Verified")
     return True
 
 
@@ -666,11 +666,11 @@ async def set_priority(request):
     pause = ""
     data = dict(data)
 
-    for i in data.keys():
+    for i, value in data.items():
         if i.find("filenode") != -1:
             node_no = i.split("_")[-1]
 
-            if data[i] == "on":
+            if value == "on":
                 resume += f"{node_no}|"
             else:
                 pause += f"{node_no}|"
@@ -696,7 +696,7 @@ async def set_priority(request):
 
     await asyncio.sleep(2)
     if not await re_verfiy(pause, resume, client, torr):
-        LOGGER.error("The Torrent choose errored reverification failed")
+        LOGGER.error("Verification Failed")
     client.auth_log_out()
     return await list_torrent_contents(request)
 
@@ -730,7 +730,7 @@ async def start_server():
     return app
 
 
-async def start_server_async(port=8080):
+async def start_server_async(port=80):
 
     app = web.Application(middlewares=[e404_middleware])
     app.add_routes(routes)
